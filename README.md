@@ -1,4 +1,4 @@
-[![CI](https://github.com/verisinfra/veris-flutter-wrapper/actions/workflows/ci.yml/badge.svg)](https://github.com/verisinfra/veris-flutter-wrapper/actions/workflows/ci.yml)
+[![CI](https://github.com/Veris-Lab/veris-flutter-wrapper/actions/workflows/ci.yml/badge.svg)](https://github.com/Veris-Lab/veris-flutter-wrapper/actions/workflows/ci.yml)
 [![veris_capture on pub.dev](https://img.shields.io/pub/v/veris_capture.svg?label=veris_capture)](https://pub.dev/packages/veris_capture)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
