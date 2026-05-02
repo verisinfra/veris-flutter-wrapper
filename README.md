@@ -1,18 +1,25 @@
+[![CI](https://github.com/verisinfra/veris-flutter-wrapper/actions/workflows/ci.yml/badge.svg)](https://github.com/verisinfra/veris-flutter-wrapper/actions/workflows/ci.yml)
+[![veris_capture on pub.dev](https://img.shields.io/pub/v/veris_capture.svg?label=veris_capture)](https://pub.dev/packages/veris_capture)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 # Veris Flutter Wrapper
 
-A community-maintained Flutter wrapper for [Veris](https://verisinfra.com) identity verification SDKs.
+Flutter integration guide and examples for [Veris](https://verisinfra.com) identity verification.
+
+Uses the official [`veris_capture`](https://pub.dev/packages/veris_capture) package published on pub.dev.
 
 ## Supported products
 
 - **Veris Capture** - Face capture with passive and active liveness detection
-- **Veris Scan** - Document OCR for Nigerian ID types (NIN, passport, driver's licence, PVC, utility bills) - *coming soon*
+- **Veris Scan** - Document OCR for Nigerian ID types - coming soon
 
 ## Requirements
 
-- Flutter >=3.x
-- Android minimum SDK 21
-- iOS minimum 13
-- A free Veris sandbox API key - sign up at https://verisinfra.com
+- Flutter >=3.10.0
+- Dart >=3.0.0
+- Android minimum SDK 24
+- iOS minimum 15.0
+- A free Veris sandbox key - sign up at https://verisinfra.com
 
 ---
 
@@ -20,10 +27,8 @@ A community-maintained Flutter wrapper for [Veris](https://verisinfra.com) ident
 
 ```yaml
 dependencies:
-  veris_flutter: ^0.1.0
+  veris_capture: ^1.0.0
 ```
-
-Then run:
 
 ```bash
 flutter pub get
@@ -31,7 +36,7 @@ flutter pub get
 
 ### Android
 
-No additional setup required. Minimum SDK 21 is set automatically.
+No additional setup required.
 
 ### iOS
 
@@ -46,45 +51,58 @@ Add camera usage description to `ios/Runner/Info.plist`:
 
 ## Quick start - Veris Capture
 
-Veris Capture handles face capture with optional liveness detection depending on your plan.
-
 ```dart
-import 'package:veris_flutter/veris_flutter.dart';
+import 'package:veris_capture/veris_capture.dart';
 
-// Initialise once - at app startup
+// Initialise once at startup
 await VerisCapture.init(licenseKey: 'veris_sandbox_reg_xxxx');
 
 // Fetch a nonce from your backend before each session
 final nonce = await yourBackend.fetchNonce();
 
-// Start a capture session
+// Start capture
 final result = await VerisCapture.startCapture(nonce: nonce);
 
 if (result.success) {
-  // Send the signed payload to your backend for verification
   await yourBackend.verifyResult(result.signedPayload);
-} else {
-  print('Capture failed: ${result.errorMessage}');
 }
 ```
 
-The `signedPayload` is an ECDSA-signed JSON object. Send it to your backend and POST it to `https://api.verisinfra.com/v1/sdk/verify-result` for server-side confirmation.
+### Handle all result states
+
+```dart
+final result = await VerisCapture.startCapture(nonce: nonce);
+
+switch (result.state) {
+  case CaptureState.success:
+    await yourBackend.verifyResult(result.signedPayload!);
+
+  case CaptureState.failure:
+    showDialog(message: result.errorMessage);
+
+  case CaptureState.subscriptionInactive:
+    showRenewalPrompt();
+
+  case CaptureState.cancelled:
+    break;
+}
+```
+
+The SDK never throws an unhandled exception. It always returns one of these four states.
 
 ### Liveness detection by plan
 
 | Feature | Starter | Regular | Pro |
 |---|---|---|---|
 | Face capture + quality checks | Yes | Yes | Yes |
-| Passive liveness (LBP) | - | Yes | Yes |
+| Passive liveness | - | Yes | Yes |
 | Active liveness - 1 challenge | - | Yes | Yes |
 | Active liveness - 2-4 challenges | - | - | Yes |
 | Video capture | - | - | Yes |
 
-On Regular and Pro plans, liveness runs automatically based on your plan flags - no extra configuration needed.
+Liveness runs automatically based on your plan - no extra configuration needed.
 
 ### Pro active liveness configuration
-
-Pro plans support 2-4 independent dot-follow rounds with randomised directions:
 
 ```dart
 final result = await VerisCapture.startCapture(
@@ -96,75 +114,43 @@ final result = await VerisCapture.startCapture(
 );
 ```
 
-### Handling all result states
-
-```dart
-final result = await VerisCapture.startCapture(nonce: nonce);
-
-switch (result.state) {
-  case CaptureState.success:
-    // result.signedPayload is ready to send to your backend
-    await yourBackend.verifyResult(result.signedPayload);
-    break;
-
-  case CaptureState.failure:
-    // User-facing message is in result.errorMessage
-    // Error code for your logs is in result.errorCode
-    showDialog(message: result.errorMessage);
-    break;
-
-  case CaptureState.subscriptionInactive:
-    // Subscription has lapsed - prompt renewal
-    showRenewalPrompt();
-    break;
-
-  case CaptureState.cancelled:
-    // User dismissed the capture screen
-    break;
-}
-```
-
-The SDK never throws an unhandled exception into your app. It always returns one of the four states above.
-
 ---
 
-## Backend integration - nonce flow
+## Nonce flow (replay attack protection)
 
-Each capture session requires a fresh nonce from your backend to prevent replay attacks.
+Generate a nonce on your backend before each session and pass it to the SDK.
 
 **Your backend:**
 
-```dart
-// Fetch nonce before starting each session
-Future<String> fetchNonce() async {
-  final response = await http.post(
-    Uri.parse('https://your-api.com/generate-nonce'),
-  );
-  return jsonDecode(response.body)['nonce'];
-}
-```
-
-**Your backend server (Node.js example):**
-
 ```javascript
-// Generate a UUID v4 nonce per session
+// Node.js - generate nonce and store in Redis
 app.post('/generate-nonce', async (req, res) => {
   const nonce = crypto.randomUUID();
-  // Store in Redis with 10-minute TTL
   await redis.set(`nonce:${nonce}`, 'pending', 'EX', 600);
   res.json({ nonce });
 });
+```
 
-// After SDK returns a signed payload, verify it
+**Your Flutter app:**
+
+```dart
+Future<String> fetchNonce() async {
+  final response = await http.post(Uri.parse('https://your-api.com/generate-nonce'));
+  return jsonDecode(response.body)['nonce'] as String;
+}
+```
+
+**After capture, verify the signed payload:**
+
+```javascript
+// Node.js - forward to Veris verify endpoint
 app.post('/verify-result', async (req, res) => {
-  const { signedPayload } = req.body;
   const response = await fetch('https://api.verisinfra.com/v1/sdk/verify-result', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ signed_payload: signedPayload }),
+    body: JSON.stringify({ signed_payload: req.body.signedPayload }),
   });
-  const result = await response.json();
-  res.json(result);
+  res.json(await response.json());
 });
 ```
 
@@ -172,26 +158,21 @@ app.post('/verify-result', async (req, res) => {
 
 ## Sandbox mode
 
-During development, use a sandbox key. It is free and requires no KYC:
+Use a sandbox key during development. Free, no payment required:
 
 ```dart
 await VerisCapture.init(licenseKey: 'veris_sandbox_reg_xxxx');
 ```
 
-Sandbox sessions show a small "SANDBOX" badge in the camera preview. The badge is removed automatically when you switch to a production key.
+The SDK shows a small "SANDBOX" badge in the camera preview. It disappears automatically when you switch to a production key.
 
-Sandbox limits:
-- 50 sessions per day
-- Results are marked `"environment": "sandbox"` in the signed payload
-- Sandbox-signed results are rejected by the production verify endpoint
-
-Get a free sandbox key at https://verisinfra.com.
+Limits: 50 sessions per day. Results are marked `"environment": "sandbox"`.
 
 ---
 
 ## Veris Scan - coming soon
 
-Document OCR support (NIN, passport, driver's licence, PVC, and utility bills) is in active development. Watch this repo for updates.
+Document OCR (NIN, passport, driver's licence, PVC, utility bills) is in active development. Watch this repo for updates.
 
 ---
 
@@ -201,26 +182,34 @@ Document OCR support (NIN, passport, driver's licence, PVC, and utility bills) i
 
 | Method | Description |
 |---|---|
-| `VerisCapture.init({licenseKey})` | Initialise the SDK. Call once at startup. |
-| `VerisCapture.startCapture({nonce, config})` | Launch the capture screen. Returns a `CaptureResult`. |
+| `VerisCapture.init({licenseKey})` | Initialise. Call once at startup. |
+| `VerisCapture.startCapture({nonce, config})` | Launch capture screen. Returns `CaptureResult`. |
 
 ### VerisSessionConfig
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `proRandomChallengeCount` | `int` | 2 | Number of dot-follow rounds for Pro plans. Range 2-4. |
-| `enforceChallenge` | `bool` | false | Force active liveness even if passive liveness already passed. |
+| `proRandomChallengeCount` | `int` | 2 | Dot-follow rounds for Pro plans. Range 2-4. |
+| `enforceChallenge` | `bool` | false | Force active liveness even if passive passed. |
 
 ### CaptureResult
 
 | Field | Type | Description |
 |---|---|---|
 | `state` | `CaptureState` | `success`, `failure`, `subscriptionInactive`, or `cancelled` |
-| `signedPayload` | `String?` | ECDSA-signed JSON. Present only on `success`. |
-| `errorMessage` | `String?` | User-facing error message. Present on `failure`. |
+| `signedPayload` | `String?` | ECDSA-signed JSON. Present on `success`. |
+| `errorMessage` | `String?` | User-facing error. Present on `failure`. |
 | `errorCode` | `String?` | Machine-readable error code. Present on `failure`. |
 
 ---
+
+## Example app
+
+See [`example/lib/main.dart`](example/lib/main.dart) for a complete working example.
+
+## Documentation
+
+Full docs at [verisinfra.com/docs](https://verisinfra.com/docs)
 
 ## Contributing
 
