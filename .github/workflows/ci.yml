@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  analyze:
+    name: Analyze example app
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.x'
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: cd example && flutter pub get
+
+      - name: Analyze
+        run: cd example && flutter analyze --fatal-infos
+
+      - name: Check formatting
+        run: cd example && dart format --output=none --set-exit-if-changed lib/
